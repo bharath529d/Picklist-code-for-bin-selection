@@ -1,0 +1,182 @@
+
+info "PICKLIST NO. " + picklist.get("picklist_number");
+//line_items from the picklist to get all the line_item
+line_items = picklist.get("line_items");
+// picklist_map is the put request payload to be sent for selecting the bin
+picklist_map = Map();
+picklist_map.put("picklist_number",picklist.get("picklist_number"));
+picklist_map.put("date",picklist.get("date"));
+picklist_map.put("notes",picklist.get("notes"));
+picklist_map.put("assignee_id",picklist.get("assignee_id"));
+picklist_map.put("warehouse_id",picklist.get("warehouse_id"));
+// Custom fields list should be empty unless we have a custom field
+picklist_map.put("custom_fields",picklist.get("custom_fields"));
+// creating the line_items for the payload with updated storag_id
+line_items_list = list();
+status = "completed";
+// error message to be sent to mail if any
+for each  line_item in line_items
+{
+	// url to get the bin details associated with an item
+	url = "https://inventory.zoho.com/api/v1/autocomplete/storages?search_text=&item_id=" + line_item.get("item_id") + "&show_stock_only_bins=true&warehouse_id=" + picklist.get("warehouse_id") + "&organization_id=" + organization.get("organization_id");
+	// to get the storages details associated with the item
+	get_response = invokeurl
+	[
+		url :url
+		type :GET
+		detailed:True
+		connection:"least_bin_selection"
+	];
+	response_code = get_response.get("responseCode");
+	/* line item map will contain `storages` if the response_code is 200, otherwise it won't. Note: line_item_map is the part of payload that is the single line_item with the storage(bin) details to be udpated */
+	line_item_map = Map();
+	if(response_code == 200)
+	{
+		// bins_data contains the data of each bin associated with an item, so it has a list of bins
+		storages = get_response.get("responseText").get("results");
+		desired_storages = list();
+		for each  storage in storages
+		{
+			if(!storage.get("storage_name").containsIgnoreCase("Area"))
+			{
+				desired_storages.add(storage);
+			}
+		}
+		storages = desired_storages;
+		// ---> Bin selection logic starts here
+		//First we need to sort the list of maps(i.e storages list) in ascending order and then we use the sequential least bin consumpion logic....
+		// Step 1: Create a list of balance quantities (since we gonna sort based on balance quantity of each storage)
+		balance_quantities_list = list();
+		for each  storage in storages
+		{
+			balance_quantities_list.add(storage.get("balance_quantity"));
+		}
+		// Step 2: Sort balance quantities
+		sorted_balance_quantities = balance_quantities_list.sort(true);
+		// Step 3: Build the final sorted list of storages
+		sorted_storages = list();
+		used_indexes = list();
+		for each  qty in sorted_balance_quantities
+		{
+			for each index i in storages
+			{
+				if(storages.get(i).get("balance_quantity") == qty && !used_indexes.contains(i))
+				{
+					sorted_storages.add(storages.get(i));
+					used_indexes.add(i);
+					// Ensures duplicates are handled one by one
+					break;
+				}
+			}
+		}
+		// since we have sorted storages, we don't need storages
+		storages = null;
+		quan_to_be_picked = line_item.get("quantity_to_be_picked");
+		bin_quan_detail = list();
+		// Sequential least bin consumption logic
+		for each  storage in sorted_storages
+		{
+			if(storage.get("balance_quantity") >= quan_to_be_picked)
+			{
+				bin_quan_detail.add(quan_to_be_picked);
+				quan_to_be_picked = 0;
+				break;
+			}
+			else
+			{
+				quan_remaining = quan_to_be_picked - storage.get("balance_quantity");
+				bin_quan_detail.add(storage.get("balance_quantity"));
+				quan_to_be_picked = quan_remaining;
+			}
+		}
+		// qty_picked is for identifying how many qty_pick is picked for a item from respective bins
+		qty_picked = 0;
+		for each  qty in bin_quan_detail
+		{
+			qty_picked = qty_picked + qty;
+		}
+		if(quan_to_be_picked > 0)
+		{
+			// quan_to_be_picked is the quantity needed to satisfy the quantity ordered for the respective book 
+			current_remaining_qty_mes = line_item.get("name") + ", " + line_item.get("sku") + " --> " + quan_to_be_picked;
+			info current_remaining_qty_mes;
+			status = "in_progress";
+		}
+		storages_list = list();
+		for each index i in bin_quan_detail
+		{
+			storage_map = Map();
+			storage_map.put("storage_id",sorted_storages.get(i).get("storage_id"));
+			storage_map.put("out_quantity",bin_quan_detail.get(i));
+			storages_list.add(storage_map);
+		}
+		// since the response_code is 200, so `storages` will be present in the line item
+		line_item_map.put("storages",storages_list);
+		// ---> Bin selection logic ends here
+	}
+	else
+	{
+		// if response_code is not 200
+		current_error_mes = " <br>Error Message: " + get_response.get("responseText").get("message") + " <br>Error Code: " + get_response.get("responseText").get("code") + " <br>HTTP Status Code: " + response_code + " <br>Contact Media Lab!!" + " <br>";
+		sendmail
+		[
+			from :zoho.loginuserid
+			to :zoho.loginuserid
+			cc:"apps@chennaimath.org"
+			subject :"FAILED! Picklist No. " + picklist.get("picklist_number")
+			message :"Picklist Bin Selection Failed!<br><br>" + current_error_mes
+		]
+		info "mail sent...";
+		current_error_mes = replaceAll(current_error_mes,"<br>","");
+		info "Picklist BIN SELECTION FAILED... ";
+		info current_error_mes;
+		info "Get response for getting the bin detials is as below: ";
+		info get_response;
+		throws "SOME ERROR OCCURRED, REFER THE CORRESPONDING EMAIL YOU RECEIVED";
+	}
+	line_item_map.put("line_item_id",line_item.get("line_item_id"));
+	line_item_map.put("so_line_item_id",line_item.get("so_line_item_id"));
+	line_item_map.put("quantity_to_be_picked",line_item.get("quantity_to_be_picked"));
+	line_item_map.put("quantity_picked",qty_picked);
+	line_item_map.put("status",status);
+	line_item_map.put("item_custom_fields",line_item.get("item_custom_fields"));
+	// adding the line_item to the line_items_list
+	line_items_list.add(line_item_map);
+}
+info "line_items_list : ";
+info line_items_list;
+// adding the line_items which has the storage details to update the bins in the put request payload
+picklist_map.put("line_items",line_items_list);
+// final and holy request to update the bins of each item
+put_response = invokeurl
+[
+	url :"https://inventory.zoho.com/api/v1/picklists/" + picklist.get("picklist_id") + "?organization_id=" + organization.get("organization_id")
+	type :PUT
+	parameters:picklist_map.toString()
+	detailed:True
+	connection:"least_bin_selection"
+];
+put_req_response_code = put_response.get("responseCode");
+if(put_req_response_code != 200)
+{
+	current_error_mes = " <br>Error: " + put_response.get("responseText").get("message") + " <br>Error Code: " + put_response.get("responseText").get("code") + " <br>Http Status Code: " + put_req_response_code;
+	sendmail
+	[
+		from :zoho.loginuserid
+		to :zoho.loginuserid
+		cc:"apps@chennaimath.org"
+		subject :"FAILED! Picklist No. " + picklist.get("picklist_number")
+		message :"Picklist Bin Selection Failed!<br>" + current_error_mes
+	]
+	info "mail sent...";
+	current_error_mes = replaceAll(current_error_mes,"<br>","");
+	info "Picklist BIN SELECTION FAILED... ";
+	info current_error_mes;
+	info "Put Response is as below: ";
+	info put_response;
+	throws "SOME ERROR OCCURRED, REFER THE CORRESPONDING EMAIL YOU RECEIVED";
+}
+else
+{
+	info "Picklist Bin Selection Completed Successfully";
+}
