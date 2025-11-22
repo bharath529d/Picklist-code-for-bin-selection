@@ -26,14 +26,14 @@ for each  line_item in line_items
 		continue;
 	}
 	// url to get the bin details associated with an item
-	url = "https://inventory.zoho.com/api/v1/autocomplete/storages?search_text=&item_id=" + line_item.get("item_id") + "&show_stock_only_bins=true&warehouse_id=" + picklist.get("warehouse_id") + "&organization_id=" + organization.get("organization_id");
+	url = "https://inventory.zoho.com/api/v1/storagelocations?item_id=" + line_item.get("item_id") + "&storage_zone_id=1309294000735106605&warehouse_id=" + picklist.get("warehouse_id") + "&organization_id=" + organization.get("organization_id");
 	// to get the storages details associated with the item
 	get_response = invokeurl
 	[
 		url :url
 		type :GET
 		detailed:True
-		connection:"least_bin_selection"
+		connection:"fetch_bin_storage_details"
 	];
 	response_code = get_response.get("responseCode");
 	/* line item map will contain `storages` if the response_code is 200, otherwise it won't. Note: line_item_map is the part of payload that is the single line_item with the storage(bin) details to be udpated */
@@ -41,14 +41,11 @@ for each  line_item in line_items
 	if(response_code == 200)
 	{
 		// bins_data contains the data of each bin associated with an item, so it has a list of bins
-		storages = get_response.get("responseText").get("results");
+		storages = get_response.get("responseText").get("storage_locations");
 		desired_storages = list();
 		for each  storage in storages
 		{
-			if(!storage.get("storage_name").containsIgnoreCase("Area"))
-			{
-				desired_storages.add(storage);
-			}
+			desired_storages.add(storage);
 		}
 		storages = desired_storages;
 		// ---> Bin selection logic starts here
