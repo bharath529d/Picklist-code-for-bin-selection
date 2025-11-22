@@ -14,9 +14,17 @@ picklist_map.put("custom_fields",picklist.get("custom_fields"));
 // creating the line_items for the payload with updated storag_id
 line_items_list = list();
 status = "completed";
+batch_tracked_items_details = "";
+contains_batch_tracked_items = False;
 // error message to be sent to mail if any
 for each  line_item in line_items
 {
+	if(line_item.get("track_batch_number"))
+	{
+		contains_batch_tracked_items = True;
+		batch_tracked_items_details = batch_tracked_items_details + "<br>" + line_item.get("name") + ", " + line_item.get("sku") + ", " + line_item.get("quantity_ordered");
+		continue;
+	}
 	// url to get the bin details associated with an item
 	url = "https://inventory.zoho.com/api/v1/autocomplete/storages?search_text=&item_id=" + line_item.get("item_id") + "&show_stock_only_bins=true&warehouse_id=" + picklist.get("warehouse_id") + "&organization_id=" + organization.get("organization_id");
 	// to get the storages details associated with the item
@@ -113,6 +121,14 @@ for each  line_item in line_items
 		// since the response_code is 200, so `storages` will be present in the line item
 		line_item_map.put("storages",storages_list);
 		// ---> Bin selection logic ends here
+		line_item_map.put("line_item_id",line_item.get("line_item_id"));
+		line_item_map.put("so_line_item_id",line_item.get("so_line_item_id"));
+		line_item_map.put("quantity_to_be_picked",line_item.get("quantity_to_be_picked"));
+		line_item_map.put("quantity_picked",qty_picked);
+		line_item_map.put("status",status);
+		line_item_map.put("item_custom_fields",line_item.get("item_custom_fields"));
+		// adding the line_item to the line_items_list
+		line_items_list.add(line_item_map);
 	}
 	else
 	{
@@ -126,6 +142,7 @@ for each  line_item in line_items
 			subject :"FAILED! Picklist No. " + picklist.get("picklist_number")
 			message :"Picklist Bin Selection Failed!<br><br>" + current_error_mes
 		]
+		info "Error in GET request";
 		info "mail sent...";
 		current_error_mes = replaceAll(current_error_mes,"<br>","");
 		info "Picklist BIN SELECTION FAILED... ";
@@ -134,14 +151,6 @@ for each  line_item in line_items
 		info get_response;
 		throws "SOME ERROR OCCURRED, REFER THE CORRESPONDING EMAIL YOU RECEIVED";
 	}
-	line_item_map.put("line_item_id",line_item.get("line_item_id"));
-	line_item_map.put("so_line_item_id",line_item.get("so_line_item_id"));
-	line_item_map.put("quantity_to_be_picked",line_item.get("quantity_to_be_picked"));
-	line_item_map.put("quantity_picked",qty_picked);
-	line_item_map.put("status",status);
-	line_item_map.put("item_custom_fields",line_item.get("item_custom_fields"));
-	// adding the line_item to the line_items_list
-	line_items_list.add(line_item_map);
 }
 info "line_items_list : ";
 info line_items_list;
@@ -159,6 +168,7 @@ put_response = invokeurl
 put_req_response_code = put_response.get("responseCode");
 if(put_req_response_code != 200)
 {
+	info "Error in PUT request";
 	current_error_mes = " <br>Error: " + put_response.get("responseText").get("message") + " <br>Error Code: " + put_response.get("responseText").get("code") + " <br>Http Status Code: " + put_req_response_code;
 	sendmail
 	[
@@ -178,5 +188,18 @@ if(put_req_response_code != 200)
 }
 else
 {
-	info "Picklist Bin Selection Completed Successfully";
+	if(contains_batch_tracked_items)
+	{
+		batch_items_mes = "PICKLIST CREATION SUCCESSFULL!<br>BATCH TRACKED ITEMS:<br>ITEM_NAME, SKU, QUANTITY_ORDERED" + batch_tracked_items_details;
+		sendmail
+		[
+			from :zoho.loginuserid
+			to :zoho.loginuserid
+			cc:"apps@chennaimath.org"
+			subject :"BATCH TRACKED ITEMS FOR PICKLIST NO. " + picklist.get("picklist_number")
+			message :batch_items_mes
+		]
+		info "mail sent...";
+		info "Picklist Bin Selection Completed Successfully";
+	}
 }
