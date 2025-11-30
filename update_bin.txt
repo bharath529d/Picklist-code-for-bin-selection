@@ -33,7 +33,7 @@ for each  line_item in line_items
 		url :url
 		type :GET
 		detailed:True
-		connection:"fetch_bin_storage_details"
+		connection:"picklist_bin_selection"
 	];
 	response_code = get_response.get("responseCode");
 	/* line item map will contain `storages` if the response_code is 200, otherwise it won't. Note: line_item_map is the part of payload that is the single line_item with the storage(bin) details to be udpated */
@@ -160,7 +160,7 @@ put_response = invokeurl
 	type :PUT
 	parameters:picklist_map.toString()
 	detailed:True
-	connection:"least_bin_selection"
+	connection:"picklist_bin_selection"
 ];
 put_req_response_code = put_response.get("responseCode");
 if(put_req_response_code != 200)
